@@ -12,6 +12,7 @@ const fs = require("fs");
 const port = process.argv[2] || 3000;
 const connectedClients = new Set(); // Set to store connected client usernames
 const attempts = new Map(); // Map to store login attempts
+const noisyUsers = new Map(); // Set to store noisy usernames
 
 /*
 * Function: readLogConfig(configFilePath)
@@ -65,6 +66,57 @@ function saveLog(logFilePath, logData) {
     }
   });
 }
+
+/*
+* Function: parseXML(xmlString)
+* Parameters: xmlString - the XML string to be parsed
+* Description: Parses an XML string and extracts the username, level, message, and timestamp
+* Return values: The parsed XML data as a JSON object
+*/
+function parseXML(xmlString) {
+    // Define regex patterns for each element
+    const usernamePattern = /<username>(.*?)<\/username>/;
+    const levelPattern = /<level>(.*?)<\/level>/;
+    const messagePattern = /<message>(.*?)<\/message>/;
+    const timestampPattern = /<timestamp>(.*?)<\/timestamp>/;
+  
+    // Extract data using regex
+    const usernameMatch = usernamePattern.exec(xmlString);
+    const levelMatch = levelPattern.exec(xmlString);
+    const messageMatch = messagePattern.exec(xmlString);
+    const timestampMatch = timestampPattern.exec(xmlString);
+    
+    // Check if all matches were successful and return extracted data
+    if (usernameMatch && levelMatch && messageMatch && timestampMatch) {
+      return {
+        username: usernameMatch[1],
+        level: levelMatch[1],
+        message: messageMatch[1],
+        timestamp: timestampMatch[1],
+      };
+    } else {
+      // Handle cases where not all elements were found
+      console.log(xmlString);
+      throw new Error("Invalid XML format");
+    }
+  }
+  
+    
+  /*
+  * Function: parsePlaintext(plaintext)
+  * Parameters: plaintext - the plaintext string to be parsed
+  * Description: Parses a plaintext string and extracts the username, level, message, and timestamp
+  * Return values: The parsed plaintext data as a JSON object
+  */
+  function parsePlaintext(plaintext) {
+    const parsedData = plaintext.split("|");
+    return {
+      username: parsedData[0],
+      level: parsedData[1],
+      message: parsedData[2],
+      timestamp: parsedData[3]
+    };
+  }
 
 /* 
 * Function: handleLoginAttempts(ws, username)
@@ -157,6 +209,42 @@ function unauthorizedAccess(ws, parsedMessage) {
     ws.close(); // Close the WebSocket connection
 }
 
+/*
+* Function: handlelog(ws, parsedMessage)
+* Parameters: ws - the WebSocket connection, parsedMessage - the parsed message
+* Description: Handles log messages and bans users after 5 failed attempts
+* Return values: None
+*/
+function handlelog(ws, parsedMessage) {
+    let username = parsedMessage.username
+    if (noisyUsers.has(username)) {
+      if(noisyUsers.get(username) <= 5){
+          ws.send("Error: Please send the correct message level.");
+        const logData = {
+          username: username,
+          level: "WARN",
+          message: "unknown messege level detected.",
+          timestamp: new Date().toISOString(),
+        };
+        saveLog(logConfig.logFilePath, parsedMessage);
+        noisyUsers.set(username, noisyUsers.get(username) + 1);
+      }else{
+        ws.send("Error: You have been banned from the server.");
+        ws.close(); // Close the WebSocket connection
+      }
+    }else{
+      ws.send("Error: Please send the correct message level.");
+      const logData = {
+        username: username,
+        level: "WARN",
+        message: "unknown messege level detected.",
+        timestamp: new Date().toISOString(),
+      };
+      saveLog(logConfig.logFilePath, logData);
+      noisyUsers.set(username, 1);
+    }
+  }
+
 // Read logging configuration from the config file
 const logConfigFilePath = "config.json";
 let logConfig = readLogConfig(logConfigFilePath);
@@ -190,6 +278,9 @@ wss.on("connection", function connection(ws) {
             ws.close(); // Close the WebSocket connection
         } else if (!ws.login) {
             unauthorizedAccess(ws, parsedMessage);
+        }else {
+            handlelog(ws, parsedMessage);
+            
         }
     }
     catch (error) {
