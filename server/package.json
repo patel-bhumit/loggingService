@@ -1,0 +1,23 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "description": "Logging service server side",
+  "main": "server.js",
+  "scripts": {
+    "test": "npm test",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/patel-bhumit/loggingService.git"
+  },
+  "author": "Bhumitkumar Patel, Darsh Patel",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/patel-bhumit/loggingService/issues"
+  },
+  "homepage": "https://github.com/patel-bhumit/loggingService#readme",
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
