@@ -11,6 +11,7 @@ const fs = require("fs");
 
 const port = process.argv[2] || 3000;
 const connectedClients = new Set(); // Set to store connected client usernames
+const attempts = new Map(); // Map to store login attempts
 
 /*
 * Function: readLogConfig(configFilePath)
@@ -65,6 +66,72 @@ function saveLog(logFilePath, logData) {
   });
 }
 
+/* 
+* Function: handleLoginAttempts(ws, username)
+* Parameters: ws - the WebSocket connection, username - the username to check
+* Description: Handles login attempts and bans users after 5 failed attempts
+* Return values: None
+*/
+function handleLoginAttempts(ws, username) {
+    if (attempts.has(username)) {
+      if (attempts.get(username) >= 5) {
+        ws.send("Error: Too many login attempts. Please try again later.");
+        ws.close(); // Close the WebSocket connection
+      }
+    } else {
+      attempts.set(username, 1);
+    }
+}
+
+/* 
+* Function: handleLoginRequest(ws, parsedMessage, username)
+* Parameters: ws - the WebSocket connection, parsedMessage - the parsed message, username - the username to check
+* Description: Handles login requests and checks if the username is already connected
+* Return values: None
+*/
+function handleLoginRequest(ws, parsedMessage, username) {
+    // check is the username is in attempts
+    handleLoginAttempts(ws, parsedMessage.username);
+    
+    // check if the username is noisy
+    handleNoisyUsers(ws, parsedMessage.username);
+    // Check if the username is already connected
+    if (connectedClients.has(username)) {
+      ws.send(
+        "Error: Username already exists. Please choose a different username."
+      );
+      const logData = {
+        username: username,
+        level: "WARN",
+        message: "Username already exists. Connection rejected.",
+        timestamp: new Date().toISOString(),
+      };
+      saveLog(logConfig.logFilePath, logData);
+      attempts.set(username, attempts.get(username) + 1);
+      ws.close(); // Close the WebSocket connection
+    } else {
+
+      // Construct a login message (assuming a JSON format)
+      const loginMsg = {
+        username: username,
+        level: "INFO",
+        message: "User logged in",
+        timestamp: new Date().toISOString(),
+      };
+
+      // Append the login message to a log file (log.txt)
+      saveLog(logConfig.logFilePath, loginMsg);
+
+      // Echo back the username to the client
+      ws.send(`Welcome, ${username}! You are now connected.`);
+      ws.username = username; // Set the username for the WebSocket connection
+      ws.login = true; // Set the login status for the WebSocket connection
+
+      // Add the username to the set of connected clients
+      connectedClients.add(username);
+    }
+}
+
 // WebSocket server setup
 const wss = new WebSocket.Server({ port: port });
 
@@ -73,12 +140,44 @@ wss.on("connection", function connection(ws) {
   ws.login = false;
   ws.on("message", function incoming(message) {
     const decodedMessage = Buffer.from(message).toString("utf8");
-
-    
+    try {
+        // Parse the received message as JSON
+        let parsedMessage;
+  
+        parsedMessage = parseMessage(decodedMessage);
+        
+  
+        // Check if the message indicates a login request
+        if (parsedMessage.level === "REQ" && parsedMessage.message === "login") {
+          const username = parsedMessage.username; // Get username from the message
+          handleLoginRequest(ws, parsedMessage, username);
+        }
+    }
+    catch (error) {
+        console.error("Error parsing message:", error);
+    }
   });
 
   ws.on("close", function close() {
     console.log("Client disconnected");
+
+    // Find the username associated with the WebSocket connection
+    const username = ws.username;
+      console.log(`Username ${username} disconnected`);
+
+      // Remove the username from the set of connected clients
+      connectedClients.delete(username);
+
+      // Construct a logout message (assuming a JSON format)
+      const logoutMsg = {
+        username: username,
+        level: "INFO",
+        message: "User logged out",
+        timestamp: new Date().toISOString(),
+      };
+
+      // Append the logout message to a log file (log.txt)
+      saveLog(logConfig.logFilePath, logoutMsg);
   });
 });
 
