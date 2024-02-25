@@ -68,6 +68,27 @@ function saveLog(logFilePath, logData) {
 }
 
 /*
+* Function: function parseMessage(decodedMessage)
+* Parameters: decodedMessage - the message to be parsed
+* Description: Parses a message in JSON, XML, or plaintext format
+* Return values: The parsed message as a JSON object
+*/
+function parseMessage(decodedMessage) {
+    try {
+      parsedMessage = JSON.parse(decodedMessage);
+    } catch (jsonError) {
+      // If parsing as JSON fails, attempt to parse as XML
+      try {
+        parsedMessage = parseXML(decodedMessage);
+      } catch (xmlError) {
+        // If parsing as XML fails, attempt to handle as plaintext
+        parsedMessage = parsePlaintext(decodedMessage);
+      }
+    }
+    return parsedMessage;
+  }
+
+/*
 * Function: parseXML(xmlString)
 * Parameters: xmlString - the XML string to be parsed
 * Description: Parses an XML string and extracts the username, level, message, and timestamp
@@ -134,6 +155,27 @@ function handleLoginAttempts(ws, username) {
       attempts.set(username, 1);
     }
 }
+
+/*
+* Function: handleNoisyUsers(ws, username)
+* Parameters: ws - the WebSocket connection, username - the username to check
+* Description: Handles noisy users and bans them after 5 failed attempts
+* Return values: None
+*/
+function handleNoisyUsers(ws, username) {
+    if (noisyUsers.has(username)) {
+      if (noisyUsers.get(username) >= 5) {
+        ws.send("Error: You have been banned from the server.");
+        ws.close(); // Close the WebSocket connection
+        return false;
+      } else {
+        noisyUsers.set(username, noisyUsers.get(username) + 1);
+      }
+    } else {
+      noisyUsers.set(username, 1);
+    }
+    return true;
+  }
 
 /* 
 * Function: handleLoginRequest(ws, parsedMessage, username)
@@ -271,17 +313,22 @@ wss.on("connection", function connection(ws) {
         
   
         // Check if the message indicates a login request
-        if (parsedMessage.level === "REQ" && parsedMessage.message === "login") {
-          const username = parsedMessage.username; // Get username from the message
-          handleLoginRequest(ws, parsedMessage, username);
-        } else if ( parsedMessage.level === "REQ" && parsedMessage.message === "logout" && ws.login) {
-            ws.close(); // Close the WebSocket connection
-        } else if (!ws.login) {
-            unauthorizedAccess(ws, parsedMessage);
-        }else {
-            handlelog(ws, parsedMessage);
-            
-        }
+      if (parsedMessage.level === "REQ" && parsedMessage.message === "login") {
+        const username = parsedMessage.username; // Get username from the message
+        handleLoginRequest(ws, parsedMessage, username);
+      } else if (ws.login && ["REQ", "INFO", "ERROR", "WARN"].includes(parsedMessage.level)) {
+          // For non-login messages, log them to server.log
+          saveLog(logConfig.logFilePath, parsedMessage);
+          // Echo back the received message
+          ws.send("Echo: " + parsedMessage.level + " log received from " + parsedMessage.username);
+      } else if ( parsedMessage.level === "REQ" && parsedMessage.message === "logout" && ws.login) {
+        ws.close(); // Close the WebSocket connection
+      } else if (!ws.login) {
+        unauthorizedAccess(ws, parsedMessage);
+      } else {
+        handlelog(ws, parsedMessage);
+        
+      }
     }
     catch (error) {
         console.error("Error parsing message:", error);
