@@ -132,6 +132,41 @@ function handleLoginRequest(ws, parsedMessage, username) {
     }
 }
 
+/*
+* Function: unauthorizedAccess(ws, parsedMessage)
+* Parameters: ws - the WebSocket connection, parsedMessage - the parsed message
+* Description: Handles unauthorized access attempts and bans users after 5 failed attempts
+* Return values: None
+*/
+function unauthorizedAccess(ws, parsedMessage) {
+  
+    handleNoisyUsers(ws, parsedMessage.username);
+    ws.send("Error: Please login first.");
+  
+    const logData = {
+      username: username,
+      level: "WARN",
+      message: "Unauthorized access attempt detected.",
+      timestamp: new Date().toISOString(),
+    };
+  
+    saveLog(logConfig.logFilePath, logData);
+  
+    handleNoisyUsers(ws, parsedMessage.username);
+  
+    ws.close(); // Close the WebSocket connection
+}
+
+// Read logging configuration from the config file
+const logConfigFilePath = "config.json";
+let logConfig = readLogConfig(logConfigFilePath);
+if (!logConfig) {
+  console.error("Logging configuration not found. Exiting.");
+  process.exit(1);
+}
+
+console.log("Logging configuration:", logConfig);
+
 // WebSocket server setup
 const wss = new WebSocket.Server({ port: port });
 
@@ -151,6 +186,10 @@ wss.on("connection", function connection(ws) {
         if (parsedMessage.level === "REQ" && parsedMessage.message === "login") {
           const username = parsedMessage.username; // Get username from the message
           handleLoginRequest(ws, parsedMessage, username);
+        } else if ( parsedMessage.level === "REQ" && parsedMessage.message === "logout" && ws.login) {
+            ws.close(); // Close the WebSocket connection
+        } else if (!ws.login) {
+            unauthorizedAccess(ws, parsedMessage);
         }
     }
     catch (error) {
